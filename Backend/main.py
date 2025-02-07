@@ -11,6 +11,9 @@ import whisper
 from openai import OpenAI
 from transformers import pipeline
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+import time
 
 app = FastAPI()
 load_dotenv(override=True)
@@ -91,38 +94,56 @@ async def upload(file: UploadFile = File(...)):
         "summary": summary
     }, status_code=200)
 
-@app.post("/interrogate")
-async def interrogate(file_id: str, question: dict):
-    path = os.path.join(UPLOAD_FOLDER, file_id)
+class InterrogateRequest(BaseModel):
+    file_id: str
+    question: str
+
+async def stream_response(text):
+    for word in text.split():
+        yield word + " "
+        time.sleep(0.045)
+
+@app.post("/interrogate/")
+async def interrogate(data: InterrogateRequest):
+    path = os.path.join(UPLOAD_FOLDER, data.file_id)
 
     if not os.path.exists(path):
         raise HTTPException(status_code=400, detail="File does not exist - did you upload it first?")
-    
-    if not question or 'question' not in question:
-        raise HTTPException(status_code=400, detail="Expected JSON request body with 'question' field")
-    
-    query = question.get('question', '')
     
     with open(path, "r") as file:
         text = file.read()
 
     response = openai.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
+        model="gpt-4o-mini",
+        messages=[
             {'role': 'system', 'content': "You are a document querying system. The user will present you with a document and a question about the document; you should answer their question, citing portions of the original text as needed. Avoid framing, such as 'according to the document.'"},
-            {'role': 'user', 'content': f"Document:\n===\n{text}\n===\nQuestion: {query}"}
-        ],)
-    
+            {'role': 'user', 'content': f"Document:\n===\n{text}\n===\nQuestion: {data.question}"}
+        ]
+    )
+
     output = response.choices[0].message.content
-
-    return JSONResponse({"answer": output}, status_code=200)
-
-
+    return StreamingResponse(stream_response(output), media_type="text/plain")
 
 sentiment_analyzer = pipeline("sentiment-analysis")
 
 @app.post("/analyze-sentiment/")
 async def analyze_sentiment(data: dict):
-    text = data["text"]
-    result = sentiment_analyzer(text)
-    return {"sentiment": result[0]["label"], "score": result[0]["score"]}
+    try:
+        text = data["text"]
+        result = sentiment_analyzer(text)
+        return {"sentiment": result[0]["label"], "score": result[0]["score"]}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error analyzing sentiment: {str(e)}")
+
+@app.delete("/delete/{file_id}")
+async def delete_file(file_id: str):
+    file_path = os.path.join(UPLOAD_FOLDER, file_id)
+
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=400, detail="File does not exist")
+
+    try:
+        os.remove(file_path)
+        return {"message": "File deleted successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error deleting file: {str(e)}")

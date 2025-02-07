@@ -1,4 +1,4 @@
 .env
 luminai/
 __pycache__/
-Uploads/
+Uploads/*
