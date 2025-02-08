@@ -34,7 +34,7 @@ export default function UploadBox({ onUpload }) {
       </button>
 
       <p className="text-md text-[#0077ff] mt-4 opacity-80">
-        Supported formats: PDF, MP3, TXT, JPG, JPEG, PNG
+        Supported formats: PDF, MP3, WAV, TXT, JPG, JPEG, PNG
       </p>
     </div>
   );
